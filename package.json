@@ -1,0 +1,20 @@
+{
+  "name": "redis-q-worker",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "redis",
+    "queue",
+    "worker",
+    "cluster"
+  ],
+  "author": "babak.zarrinbal@gmail.com",
+  "license": "ISC",
+  "dependencies": {
+    "object-projection": "^1.0.3"
+  }
+}
