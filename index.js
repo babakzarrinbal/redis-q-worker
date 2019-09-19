@@ -7,12 +7,17 @@ var jobsub;
 var wosub;
 var client = redis.createClient();
 
-exp.work = (event, ...data) =>
-  new Promise(async resolve => {
+/**
+ *  @param {string} event name of worder
+ *  @param {array} data args to pass to worker
+ */
+exp.work = function(event, ...data) {
+  return new Promise(async resolve => {
     let dataid = JSON.stringify(objectSort(data));
     let resolved;
     if (!jobsub) jobsub = redis.createClient(...exp.redisArgs);
     jobsub.subscribe(event + "_result_" + dataid);
+
     jobsub.on("message", (ev, d) => {
       if (ev != event + "_result_" + dataid) return;
       resolved = true;
@@ -26,18 +31,24 @@ exp.work = (event, ...data) =>
     let queue = await new Promise(res =>
       client.LRANGE(event + "::queue", 0, -1, (er, r) => res(r || []))
     );
-
     if ([...proccessing, ...queue].includes(dataid) || resolved) return;
     client.LPUSH(event + "::queue", dataid);
     client.publish(event, "tick");
   });
-
+};
 var activeworkers = {};
-exp.addWorker = (event, worker, thread = 1) => {
+/**
+ * @param {string} event name of worder
+ * @param {function} worker worker callback
+ * @param {object} options options for worker
+ * @param {number} options.thread number of thread worker will work on
+ * @param {number} options.timout timout miliseconds for worker fail
+ */
+exp.addWorker = async (event, worker, options = {}) => {
   if (!wosub) wosub = redis.createClient(...exp.redisArgs);
   wosub.subscribe(event);
 
-  let listenerfunc = async () => {
+  let listenerfunc = async (ev, data) => {
     if (!activeworkers[event].thread) return;
     let input = await new Promise(res =>
       client.RPOPLPUSH(event + "::queue", event + "::processing", (er, r) =>
@@ -50,7 +61,13 @@ exp.addWorker = (event, worker, thread = 1) => {
     parsedinput = JSON.parse(input);
     let result;
     try {
-      result = { data: await worker(...parsedinput), error: null };
+      let data = await Promise.race([
+        worker(...parsedinput),
+        new Promise(res =>
+          setTimeout((() => res("operaton timed out"), options.timout || 60000))
+        )
+      ]);
+      result = { data, error: data == "operaton timed out" ? data : null };
     } catch (e) {
       result = { data: null, error: "can't do it" };
     }
@@ -61,10 +78,12 @@ exp.addWorker = (event, worker, thread = 1) => {
   };
 
   activeworkers[event] = {
-    thread,
+    thread: options.thread || 1,
     worker: listenerfunc
   };
-  wosub.on("message", listenerfunc);
+  await wosub.on("message", listenerfunc);
+
+  await new Promise(res => setTimeout(res, 2000));
   client.publish(event, "tick");
 };
 
